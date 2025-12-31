@@ -25,6 +25,7 @@ read_file
 move_file
 search_web
 schedule_event
+delete_file
 none
 
 JSON FORMAT:

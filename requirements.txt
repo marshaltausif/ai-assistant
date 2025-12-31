@@ -1,0 +1,25 @@
+# requirements.txt
+# Core
+pyttsx3==2.90
+edge-tts==6.1.9
+playsound==1.2.2
+openai-whisper==20231117
+torch
+sounddevice==0.4.6
+numpy
+
+# Web & Automation
+selenium==4.15.2
+webdriver-manager==4.0.1
+requests==2.31.0
+beautifulsoup4==4.12.2
+pyperclip==1.8.2
+
+# Utils
+colorama==0.4.6
+asyncio
+aiofiles==23.2.1
+
+# Voice specific
+SpeechRecognition==3.10.0
+pyaudio==0.2.11  # For microphone access
