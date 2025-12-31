@@ -1,0 +1,13 @@
+{
+  "allowed_actions": [
+    "open_app",
+    "close_app",
+    "open_url",
+    "create_file",
+    "write_file",
+    "read_file",
+    "search_web",
+    "schedule_event",
+    "none"
+  ]
+}
