@@ -1,61 +1,113 @@
 import subprocess
 import json
 import re
-import time
+import os
 
-MODEL = "gemma3:1b"  # ✅ Updated to correct name
+MODEL = "gemma3:1b"
+
+def load_prompt():
+    """Load the prompt from prompt.txt file"""
+    prompt_file = os.path.join(os.path.dirname(__file__), "prompt.txt")
+    if os.path.exists(prompt_file):
+        with open(prompt_file, 'r', encoding='utf-8') as f:
+            return f.read().strip()
+    
+    # Fallback prompt
+    return """You are a local AI assistant running on a user's computer.
+
+Your job is to understand the user's request, internally plan the required steps,
+and output ONLY the final executable intent in structured JSON.
+
+IMPORTANT:
+- You may think and plan internally.
+- You must NOT reveal your reasoning.
+- You must output ONLY valid JSON.
+- No explanations, no extra text.
+- If the user specifies a storage location (folder name or alias),
+  you MUST include a move_file step to that location.
+
+If the task requires multiple steps, break it into ordered steps.
+If the task is unclear, use action "none".
+
+ALLOWED ACTIONS:
+open_app
+close_app
+open_url
+create_file
+write_file
+read_file
+move_file
+search_web
+schedule_event
+delete_file
+none
+
+JSON FORMAT:
+{
+  "steps": [
+    {
+      "action": "<allowed_action>",
+      "target": "<string or null>",
+      "content": "<string or null>"
+    }
+  ]
+}
+
+RULES:
+1. All files must be in AutoBox folders: AB1, AB2, AB3
+2. Folder aliases: ab1/a1/av1 → AB1, ab2/a2/av2 → AB2, ab3/a3/av3 → AB3
+3. For create_file: if content is list, convert to comma-separated string
+4. For greetings (hello, hi, how are you), use action: "none"
+5. For questions, use action: "none"
+
+EXAMPLES:
+User: "create hello.txt in ab2"
+Output: {"steps": [{"action": "create_file", "target": "AB2/hello.txt", "content": null}]}
+
+User: "write 'test content' to file.txt"
+Output: {"steps": [{"action": "write_file", "target": "file.txt", "content": "test content"}]}
+
+User: "hello how are you"
+Output: {"steps": [{"action": "none", "target": null, "content": null}]}
+
+User: "open google.com"
+Output: {"steps": [{"action": "open_url", "target": "https://google.com", "content": null}]}
+
+User: "search for AI news"
+Output: {"steps": [{"action": "search_web", "target": "AI news", "content": null}]}
+
+Now process this command:"""
 
 def ask_llm(user_input: str) -> str:
     """
-    Convert natural language to JSON using gemma3:1b
+    Convert natural language command to JSON intent using local LLM.
     """
-    # SIMPLE prompt for small model
-    prompt = f"""User command: {user_input}
-
-Convert this command to executable JSON. Available actions: create_file, write_file, read_file, open_app, open_url.
-
-Rules:
-- Files go in AB1, AB2, or AB3 folders
-- ab1 = AB1, ab2 = AB2, ab3 = AB3
-- Output ONLY JSON, no other text
-
-Examples:
-Command: "create notes.txt in ab2"
-Output: {{"steps": [{{"action": "create_file", "target": "AB2/notes.txt", "content": null}}]}}
-
-Command: "open google.com"
-Output: {{"steps": [{{"action": "open_url", "target": "https://google.com", "content": null}}]}}
-
-Now convert this command:
-Command: "{user_input}"
-Output:"""
+    # Load and prepare prompt
+    base_prompt = load_prompt()
+    full_prompt = f"{base_prompt}\n\nUser: \"{user_input}\"\nOutput:"
+    
+    print(f"🤖 Processing: {user_input[:50]}...")
     
     try:
-        print(f"🤖 Sending to {MODEL}: {user_input[:50]}...")
-        
         # Run Ollama
         result = subprocess.run(
             ["ollama", "run", MODEL],
-            input=prompt,
+            input=full_prompt,
             capture_output=True,
             text=True,
             encoding='utf-8',
-            timeout=20  # Give it more time
+            timeout=20
         )
         
         output = result.stdout.strip()
         
-        # Debug output
-        print(f"📥 Raw response ({len(output)} chars): {output[:200]}...")
-        
-        if not output:
-            print("⚠️ Empty response from LLM")
-            return fallback_parser(user_input)
+        # Debug
+        print(f"📥 Raw LLM output ({len(output)} chars): {output[:100]}...")
         
         # Clean the output
         cleaned = output.strip()
         
-        # Remove markdown if present
+        # Remove markdown code blocks
         if cleaned.startswith("```json"):
             cleaned = cleaned[7:]
         elif cleaned.startswith("```"):
@@ -71,7 +123,7 @@ Output:"""
             data = json.loads(cleaned)
             if isinstance(data, dict) and "steps" in data:
                 print(f"✅ Valid JSON with {len(data['steps'])} steps")
-                return json.dumps(data)
+                return json.dumps(data, ensure_ascii=False)
         except json.JSONDecodeError:
             # Try to find JSON in the text
             pass
@@ -84,7 +136,7 @@ Output:"""
                 data = json.loads(json_str)
                 if isinstance(data, dict) and "steps" in data:
                     print(f"✅ Found JSON in text: {len(data['steps'])} steps")
-                    return json.dumps(data)
+                    return json.dumps(data, ensure_ascii=False)
             except json.JSONDecodeError:
                 pass
         
@@ -103,10 +155,16 @@ Output:"""
         return fallback_parser(user_input)
 
 def fallback_parser(user_input: str) -> str:
-    """Fallback when LLM fails"""
+    """Fallback parser when LLM fails"""
     print(f"🔄 Using fallback parser for: {user_input}")
     
     text = user_input.lower().strip()
+    
+    # Check for greetings/chat
+    greetings = ["hello", "hi", "hey", "how are you", "what's up", "good morning", "good evening"]
+    for greeting in greetings:
+        if greeting in text:
+            return json.dumps({"steps": [{"action": "none", "target": None, "content": None}]})
     
     # CREATE FILE
     if "create" in text or "make" in text:
@@ -178,34 +236,37 @@ def fallback_parser(user_input: str) -> str:
             }]
         })
     
-    # OPEN
-    elif "open" in text:
-        thing = text.replace("open", "").strip()
-        
-        # Check if it's a URL
-        if "http" in thing or "www" in thing or ".com" in thing:
-            if not thing.startswith("http"):
-                thing = "https://" + thing
+    # OPEN URL
+    elif "open" in text and ("http" in text or "www" in text or ".com" in text):
+        import re
+        url_match = re.search(r'(https?://\S+|www\.\S+)', user_input)
+        if url_match:
+            url = url_match.group(1)
+            if not url.startswith("http"):
+                url = "https://" + url
+            
             return json.dumps({
                 "steps": [{
                     "action": "open_url",
-                    "target": thing,
-                    "content": None
-                }]
-            })
-        # It's an app
-        else:
-            return json.dumps({
-                "steps": [{
-                    "action": "open_app",
-                    "target": thing,
+                    "target": url,
                     "content": None
                 }]
             })
     
+    # OPEN APP
+    elif "open" in text:
+        app = user_input.replace("open", "").strip()
+        return json.dumps({
+            "steps": [{
+                "action": "open_app",
+                "target": app,
+                "content": None
+            }]
+        })
+    
     # SEARCH
     elif "search" in text:
-        query = text.replace("search", "").replace("for", "").strip()
+        query = user_input.replace("search", "").replace("for", "").strip()
         return json.dumps({
             "steps": [{
                 "action": "search_web",
@@ -228,5 +289,16 @@ def fallback_parser(user_input: str) -> str:
                 }]
             })
     
-    # Default empty response
-    return json.dumps({"steps": []})
+    # DELETE
+    elif "delete" in text or "remove" in text:
+        target = text.replace("delete", "").replace("remove", "").strip()
+        return json.dumps({
+            "steps": [{
+                "action": "delete_file",
+                "target": target,
+                "content": None
+            }]
+        })
+    
+    # Default: none action for chat
+    return json.dumps({"steps": [{"action": "none", "target": None, "content": None}]})

@@ -1,4 +1,3 @@
-# executors/web_exec.py
 import requests
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -9,10 +8,9 @@ from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 import time
 import os
-import json
 
 class WebExecutor:
-    def __init__(self, headless=True):
+    def __init__(self, headless=False):  # Default to VISIBLE browser
         self.driver = None
         self.headless = headless
         self.session = requests.Session()
@@ -26,11 +24,22 @@ class WebExecutor:
             options = webdriver.ChromeOptions()
             if self.headless:
                 options.add_argument('--headless')
+            else:
+                options.add_argument('--start-maximized')  # Open maximized
+                options.add_experimental_option("excludeSwitches", ["enable-logging"])
+            
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--disable-gpu')
+            options.add_argument('--window-size=1920,1080')
             
-            service = Service(ChromeDriverManager().install())
-            self.driver = webdriver.Chrome(service=service, options=options)
+            try:
+                service = Service(ChromeDriverManager().install())
+                self.driver = webdriver.Chrome(service=service, options=options)
+                print(f"✅ Chrome driver initialized (headless: {self.headless})")
+            except Exception as e:
+                print(f"❌ Failed to initialize Chrome driver: {e}")
+                return None
         
         return self.driver
     
@@ -38,16 +47,21 @@ class WebExecutor:
         """Open a URL in browser"""
         try:
             driver = self.init_driver()
+            if not driver:
+                return False
             
             if not url.startswith(('http://', 'https://')):
                 url = 'https://' + url
             
+            print(f"🌐 Opening: {url}")
             driver.get(url)
+            
+            # Wait for page load
             WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located((By.TAG_NAME, "body"))
             )
             
-            print(f"✅ Opened: {url}")
+            print(f"✅ Opened successfully: {url}")
             return True
             
         except Exception as e:
@@ -75,7 +89,8 @@ class WebExecutor:
             chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
             text = '\n'.join(chunk for chunk in chunks if chunk)
             
-            return text[:3000]  # Limit length
+            print(f"✅ Extracted {len(text)} chars from {url}")
+            return text[:10000]  # Limit length
             
         except Exception as e:
             print(f"❌ Failed to get content: {e}")
@@ -108,6 +123,7 @@ class WebExecutor:
                     if len(results) >= num_results:
                         break
             
+            print(f"✅ Found {len(results)} results for '{query}'")
             return results
             
         except Exception as e:
@@ -118,6 +134,8 @@ class WebExecutor:
         """Take screenshot of current page"""
         try:
             driver = self.init_driver()
+            if not driver:
+                return None
             
             # Ensure AutoBox/AB1 exists
             screenshot_dir = os.path.join("AutoBox", "AB1")
@@ -136,8 +154,9 @@ class WebExecutor:
     def close(self):
         """Close driver if open"""
         if self.driver:
-            self.driver.quit()
-            self.driver = None
-
-# Singleton instance
-web_executor = WebExecutor()
+            try:
+                self.driver.quit()
+                self.driver = None
+                print("✅ Web driver closed")
+            except:
+                pass
